@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/williammartin/jobcannon"
+	"github.com/williammartin/jobcannon/slice"
 )
 
 const HACKERNEWS_API api_root_url = "https://hacker-news.firebaseio.com/v0"
@@ -72,7 +73,7 @@ func (c *Client) FetchMostRecentCatalog() (jobcannon.Catalog, error) {
 
 	return jobcannon.Catalog{
 		Id:     jobcannon.CatalogId(fetchedStory.Id),
-		JobIds: arrayMap(intToJobID, fetchedStory.Kids),
+		JobIds: slice.Map(intToJobID, fetchedStory.Kids),
 	}, nil
 }
 
@@ -91,12 +92,4 @@ func (c *Client) FetchJob(jobId jobcannon.JobId) (jobcannon.Job, error) {
 
 func intToJobID(id int) jobcannon.JobId {
 	return jobcannon.JobId(id)
-}
-
-func arrayMap[A any, B any](mapFn func(A) B, as []A) []B {
-	mappedVals := []B{}
-	for _, a := range as {
-		mappedVals = append(mappedVals, mapFn(a))
-	}
-	return mappedVals
 }
