@@ -15,24 +15,6 @@ import (
 	"jaytaylor.com/html2text"
 )
 
-type Msg interface {
-	sealed()
-}
-
-type CursorDown struct{}
-
-func (*CursorDown) sealed() {}
-
-type CursorUp struct{}
-
-func (*CursorUp) sealed() {}
-
-type AppModel struct {
-	items []string
-}
-
-func Update()
-
 func main() {
 	repo := createRepository()
 	source := createSource()
@@ -184,3 +166,61 @@ func mustNot(err error) {
 		panic(err)
 	}
 }
+
+// type GoCUIView struct {
+// 	Title    string
+// 	Contents string
+// }
+
+// type GoCUIRenderer struct {
+// 	viewCh chan *GoCUIView
+// }
+
+// func NewGoCUIRenderer() *GoCUIRenderer {
+// 	return &GoCUIRenderer{
+// 		viewCh: make(chan *GoCUIView),
+// 	}
+// }
+
+// func (r *GoCUIRenderer) Run(ctx context.Context) error {
+// 	g, err := gocui.NewGui(gocui.Output256)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	// maxX, maxY := g.Size()
+
+// 	// Initially no view...maybe use an option?
+// 	// var v *GoCUIView
+// 	go func() {
+// 		for {
+// 			select {
+// 			case <-ctx.Done():
+// 				fmt.Println("exiting")
+// 				g.Close()
+// 				return
+// 			case view := <-r.viewCh:
+// 				fmt.Printf("%+v\n", view)
+// 				// g.Update(func(g *gocui.Gui) error {
+// 				// 	if v != nil {
+// 				// 		g.DeleteView("root")
+// 				// 	}
+// 				// 	v = view
+// 				// 	gV, err := g.SetView("root", 0, 0, maxX, maxY)
+// 				// 	if err != nil && err != gocui.ErrUnknownView {
+// 				// 		return err
+// 				// 	}
+// 				// 	gV.Title = v.Title
+// 				// 	fmt.Fprintln(gV, v.Contents)
+
+// 				// 	return nil
+// 				// })
+// 			}
+// 		}
+// 	}()
+
+// 	return nil
+// }
+
+// func (r *GoCUIRenderer) Render(view *GoCUIView) {
+// 	r.viewCh <- view
+// }

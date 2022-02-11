@@ -1,117 +1,167 @@
 package main
 
 import (
-	"os"
-	"path"
+	"context"
+	"fmt"
 
-	"github.com/williammartin/jobcannon"
-	"github.com/williammartin/jobcannon/repository"
-	"github.com/williammartin/jobcannon/ui"
-	"github.com/williammartin/jobcannon/whoishiring"
+	"github.com/jroimartin/gocui"
+	"github.com/williammartin/jobcannon/elmgo"
+	"github.com/williammartin/jobcannon/option"
 )
 
-type Repository interface {
-	Persist(expressionOfInterest jobcannon.ExpressionOfInterest) error
-	Exists(catalogId jobcannon.CatalogId, jobId jobcannon.JobId) (bool, error)
-	Load(catalogId jobcannon.CatalogId, jobId jobcannon.JobId) (jobcannon.ExpressionOfInterest, error)
+type Keybinding struct {
+	Key gocui.Key
+	Fn  func()
+}
+type GoCUIView struct {
+	Title       string
+	Contents    string
+	Keybindings []Keybinding
 }
 
-type Source interface {
-	FetchMostRecentCatalog() (jobcannon.Catalog, error)
-	FetchJob(jobId jobcannon.JobId) (jobcannon.Job, error)
+type GoCUIRenderer struct {
+	viewCh chan *GoCUIView
 }
 
-type TUI interface {
+func NewGoCUIRenderer() *GoCUIRenderer {
+	return &GoCUIRenderer{
+		viewCh: make(chan *GoCUIView),
+	}
 }
 
-type UI interface {
-	DisplayText(text string)
-	DisplayNewLine()
-	PromptForConfirmation(text string) bool
+func (r *GoCUIRenderer) Run(ctx context.Context, g *gocui.Gui) {
+	maxX, maxY := g.Size()
+
+	// Initially no view...maybe use an option?
+	var v *GoCUIView
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case view := <-r.viewCh:
+				g.Update(func(g *gocui.Gui) error {
+					if v != nil {
+						g.DeleteKeybindings("root")
+						g.DeleteView("root")
+					}
+					v = view
+					gV, err := g.SetView("root", 0, 0, maxX, maxY)
+					if err != nil && err != gocui.ErrUnknownView {
+						return err
+					}
+					gV.Title = v.Title
+
+					for _, kb := range v.Keybindings {
+						f := kb.Fn
+						if err := g.SetKeybinding("root", kb.Key, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+							f()
+							return nil
+						}); err != nil {
+							return err
+						}
+					}
+
+					if _, err := g.SetCurrentView("root"); err != nil {
+						return err
+					}
+
+					fmt.Fprintln(gV, v.Contents)
+
+					return nil
+				})
+			}
+		}
+	}()
 }
 
-type FakeExpressionRecorder struct {
-	calledWith jobcannon.ExpressionOfInterest
+func (r *GoCUIRenderer) Render(view *GoCUIView) {
+	r.viewCh <- view
 }
 
-func (fer *FakeExpressionRecorder) RecordExpression(expressionOfInterest jobcannon.ExpressionOfInterest) error {
-	fer.calledWith = expressionOfInterest
-	return nil
+// Model
+type CounterModel struct {
+	Count int32
 }
 
-func (fer *FakeExpressionRecorder) WasCalledWith(expected jobcannon.ExpressionOfInterest) bool {
-	return fer.calledWith == expected
+// Messages
+type CounterMsg interface {
+	isCounterMsg()
+}
+
+//go-sumtype:decl Msg
+type Increment struct{}
+
+func (*Increment) isCounterMsg() {}
+
+type Decrement struct{}
+
+func (*Decrement) isCounterMsg() {}
+
+// CounterApp
+type CounterApp struct {
+	dispatchHandle elmgo.Dispatcher[CounterMsg]
+}
+
+func (a *CounterApp) Init() CounterModel {
+	return CounterModel{
+		Count: 0,
+	}
+}
+
+func (a *CounterApp) Update(msg CounterMsg, model CounterModel) (CounterModel, option.Option[elmgo.Cmd]) {
+	switch CounterMsg(msg).(type) {
+	case *Increment:
+		return CounterModel{Count: model.Count + 1}, option.None[elmgo.Cmd]()
+	case *Decrement:
+		return CounterModel{Count: model.Count - 1}, option.None[elmgo.Cmd]()
+	default:
+		panic(fmt.Sprintf("unexpected msg type: %v", msg))
+	}
+}
+
+func (a *CounterApp) View(model CounterModel, dispatcher elmgo.Dispatcher[CounterMsg]) *GoCUIView {
+	return &GoCUIView{
+		Title:    "Counter",
+		Contents: fmt.Sprintf("Count is: %d", model.Count),
+		Keybindings: []Keybinding{{
+			Key: gocui.KeyEnter,
+			Fn: func() {
+				dispatcher.Dispatch(&Increment{})
+			},
+		}, {
+			Key: gocui.KeyBackspace2,
+			Fn: func() {
+				dispatcher.Dispatch(&Decrement{})
+			},
+		}},
+	}
 }
 
 func main() {
-	appModel := ui.NewApplicationModel(&FakeExpressionRecorder{}, 1, []jobcannon.Job{
-		{
-			Id:   0,
-			By:   "will",
-			Text: "foo",
-		},
-	})
-	err := ui.TUIApplicationView(appModel)
-	mustNot(err)
-
-	// repo := createRepository()
-	// source := createSource()
-	// ui := createUI()
-
-	// catalog, err := source.FetchMostRecentCatalog()
-	// mustNot(err)
-
-	// for _, jobId := range catalog.JobIds {
-	// 	exists, err := repo.Exists(catalog.Id, jobId)
-	// 	mustNot(err)
-
-	// 	if !exists {
-	// 		job, err := source.FetchJob(jobId)
-	// 		mustNot(err)
-
-	// 		ui.DisplayText(job.Text)
-	// 		ui.DisplayNewLine()
-	// 		ui.DisplayNewLine()
-	// 		interested := ui.PromptForConfirmation("Are you interested in this job?")
-	// 		repo.Persist(jobcannon.ExpressionOfInterest{
-	// 			CatalogId:  catalog.Id,
-	// 			JobId:      job.Id,
-	// 			By:         job.By,
-	// 			Text:       job.Text,
-	// 			Interested: interested,
-	// 		})
-	// 		ui.DisplayNewLine()
-	// 	}
-	// }
-}
-
-// These create functions are kind of silly, I'm mainly using them to type check
-// the interfaces until I extract different CLI command structures.
-func createRepository() Repository {
-	defaultUserConfigDir, err := os.UserConfigDir()
-	mustNot(err)
-
-	jobcannonDir := path.Join(defaultUserConfigDir, "jobcannon")
-
-	err = os.MkdirAll(jobcannonDir, 0755)
-	mustNot(err)
-
-	fs, err := repository.Filesystem(jobcannonDir)
-	mustNot(err)
-
-	return fs
-}
-
-func createSource() Source {
-	return &whoishiring.Client{}
-}
-
-func createUI() UI {
-	return &ui.Console{}
-}
-
-func mustNot(err error) {
+	g, err := gocui.NewGui(gocui.Output256)
 	if err != nil {
 		panic(err)
 	}
+
+	counterApp := &CounterApp{}
+	renderer := NewGoCUIRenderer()
+	elmer := elmgo.NewApp[CounterModel, CounterMsg, *GoCUIView](counterApp, renderer)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	renderer.Run(ctx, g)
+	elmerDone := elmer.Run(ctx)
+
+	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		cancel()
+		return gocui.ErrQuit
+	}); err != nil {
+		panic(err)
+	}
+
+	if err := g.MainLoop(); err != nil && err != gocui.ErrQuit {
+		panic(err)
+	}
+	defer g.Close()
+	<-elmerDone
 }
